@@ -1,0 +1,12 @@
+# Line endings. Git stores text files with LF.
+* text=auto
+
+# These files run in Linux (containers, CI runner): always LF, even on Windows.
+# A CRLF line ending breaks sh scripts ("bad interpreter", "$'\r': command not found").
+*.sh  text eol=lf
+*.hcl text eol=lf
+*.tpl text eol=lf
+mvnw  text eol=lf
+
+# Windows scripts keep CRLF.
+*.cmd text eol=crlf

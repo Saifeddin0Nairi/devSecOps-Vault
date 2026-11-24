@@ -1,0 +1,19 @@
+# Build output
+target/
+
+# Local config: holds the Vault dev root token, never committed (see .env.example)
+.env
+
+# Reports from local scans (in CI they are kept as artifacts)
+*.sarif
+trivy-report.json
+
+# Logs
+*.log
+
+# IDE and OS files
+.idea/
+*.iml
+.vscode/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,4 @@
+# Allowlist: the Docker build context contains only the application JAR.
+# Sources, .git, .env and reports never reach the image builder.
+*
+!target/*.jar
