@@ -17,3 +17,13 @@ scrape_configs:
       - targets: ["democyber:8081"]
         labels:
           application: democyber   # fills the "Application" filter of Grafana dashboard 11378
+
+  # Vault: needs a token with the "metrics" policy, read from a file (never written here)
+  - job_name: vault
+    metrics_path: /v1/sys/metrics
+    params:
+      format: [prometheus]
+    authorization:
+      credentials_file: /etc/prometheus/vault/vault-token
+    static_configs:
+      - targets: ["vault:8200"]
