@@ -28,8 +28,8 @@ public class DemocyberController {
     }
 
     @GetMapping("/")
-    public String home() {
-        return "Hello from Democyber Vault!";
+    public ResponseEntity<String> home() {
+        return ResponseEntity.internalServerError().body("Broken on purpose (smoke test demo)");
     }
 
     @GetMapping("/api/secure")

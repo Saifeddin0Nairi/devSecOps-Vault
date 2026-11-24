@@ -20,8 +20,8 @@ class DemocyberControllerTest {
     @Test
     void homeIsPublic() {
         assertThat(mvc.get().uri("/"))
-                .hasStatusOk()
-                .hasBodyTextEqualTo("Hello from Democyber Vault!");
+                .hasStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+                .hasBodyTextEqualTo("Broken on purpose (smoke test demo)");
     }
 
     @Test
