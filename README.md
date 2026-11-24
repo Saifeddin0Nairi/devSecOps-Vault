@@ -4,7 +4,7 @@
 > **No secret in Git, in the image or in the Compose file. Every runtime secret lives in HashiCorp Vault.**
 
 [![CI/CD](https://github.com/Saifeddin0Nairi/devSecOps-Vault/actions/workflows/ci.yml/badge.svg)](https://github.com/Saifeddin0Nairi/devSecOps-Vault/actions/workflows/ci.yml)
-<!-- Add the SonarCloud Quality Gate badge here once the SonarCloud project exists. -->
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=Saifeddin0Nairi_devSecOps-Vault&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=Saifeddin0Nairi_devSecOps-Vault)
 
 | | |
 |---|---|
