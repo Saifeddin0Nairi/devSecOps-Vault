@@ -1,0 +1,11 @@
+# Grafana data source, provisioned as code: no manual clicks, same result on every start.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus          # fixed uid, used by the provisioned dashboards
+    type: prometheus
+    access: proxy            # Grafana's server calls Prometheus, not the browser
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false

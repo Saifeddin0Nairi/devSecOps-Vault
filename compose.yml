@@ -1,0 +1,51 @@
+# Democyber Vault: local runtime.
+# Every published port is bound to 127.0.0.1, so it is reachable from this PC only.
+# Start: docker compose up -d --build --wait
+name: democyber-vault
+
+services:
+  democyber:
+    build: .
+    # CI runs the image it already built and scanned (DEMOCYBER_IMAGE). Locally: democyber-vault:local.
+    image: ${DEMOCYBER_IMAGE:-democyber-vault:local}
+    ports:
+      - "127.0.0.1:8080:8080"   # application only. Actuator (8081) is NOT published.
+    cap_drop: [ALL]             # the app needs no Linux capability
+    security_opt:
+      - no-new-privileges:true
+    # Healthcheck: defined in the Dockerfile (Actuator health on 8081).
+
+  prometheus:
+    image: prom/prometheus:v3.16.0
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "127.0.0.1:9090:9090"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9090/-/healthy"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  grafana:
+    image: grafana/grafana:13.3.1
+    environment:
+      # Temporary (Phase 1): the admin password comes from .env, with no default value.
+      # Phase 3 replaces it with a password generated and delivered by Vault.
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD in .env}
+      # No plugin download at startup. By default Grafana fetches "suggested" plugins from
+      # the internet, unpinned. We only need the built-in Prometheus data source.
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"
+    volumes:
+      # Data source provisioned as code (read-only)
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    # No data volume on purpose: a new container starts clean and applies the admin password.
+    ports:
+      - "127.0.0.1:3001:3000"
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10

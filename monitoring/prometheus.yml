@@ -1,0 +1,19 @@
+# Prometheus configuration (used by compose.yml). Targets are Compose service names.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Prometheus itself: should always be UP (sanity check)
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # The app, on its management port 8081 (reachable only inside the Compose network)
+  - job_name: democyber
+    metrics_path: /actuator/prometheus
+    scrape_interval: 5s
+    static_configs:
+      - targets: ["democyber:8081"]
+        labels:
+          application: democyber   # fills the "Application" filter of Grafana dashboard 11378
