@@ -3,7 +3,7 @@
 > DevSecOps mini-project: the full TP1 → TP4 chain, plus one signature.
 > **No secret in Git, in the image or in the Compose file. Every runtime secret lives in HashiCorp Vault.**
 
-[![CI/CD](https://github.com/Saifeddin0Nairi/democyber-vault/actions/workflows/ci.yml/badge.svg)](https://github.com/Saifeddin0Nairi/democyber-vault/actions/workflows/ci.yml)
+[![CI/CD](https://github.com/Saifeddin0Nairi/devSecOps-Vault/actions/workflows/ci.yml/badge.svg)](https://github.com/Saifeddin0Nairi/devSecOps-Vault/actions/workflows/ci.yml)
 <!-- Add the SonarCloud Quality Gate badge here once the SonarCloud project exists. -->
 
 | | |
@@ -146,8 +146,8 @@ The app still needs one credential to log in to Vault: its AppRole `secret-id`. 
 Requirements: Docker Desktop (running), JDK 21, Git.
 
 ```powershell
-git clone https://github.com/Saifeddin0Nairi/democyber-vault.git
-cd democyber-vault
+git clone https://github.com/Saifeddin0Nairi/devSecOps-Vault.git
+cd devSecOps-Vault
 
 # 1. Local config: only the Vault dev root token, with a random value
 Copy-Item .env.example .env
@@ -237,7 +237,7 @@ On a throwaway branch, I commit a fake Vault token (`hvs.…`) and open a pull r
 ## 10. Project structure
 
 ```text
-democyber-vault/
+devSecOps-Vault/
 ├── .github/workflows/ci.yml       # the CI/CD pipeline
 ├── src/main/...                   # Spring Boot app: /, /api/secure, Actuator
 ├── src/test/...                   # web tests
