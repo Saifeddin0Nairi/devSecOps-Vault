@@ -91,7 +91,7 @@ One job, like in the TPs: [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
 | 2 | Build + tests | Maven | the code does not compile or a test fails | test results in the log |
 | 3 | Code analysis | SonarCloud | the Quality Gate fails | SonarCloud dashboard |
 | 4 | Image build | Docker | the build fails | image `democyber-vault:ci-<sha>` |
-| 5 | Smoke test | curl | health is not UP, `/` is not 200, or `/api/secure` without a key is not 401 | job log |
+| 5 | Smoke test | curl | health is not UP, `/` is not 200, `/api/secure` without a key is not 401, or Actuator answers on the public port | job log |
 | 6 | Image scan | Trivy | a HIGH or CRITICAL vulnerability is found | `trivy-report` artifact (JSON) |
 | 7 | Vault integration test | Docker Compose + Vault | the app does not get its secret, or still starts when Vault denies access | job log |
 | 8 | Publish | Docker Hub | (runs only on a push to `main`) | `saifeddinenairi/democyber-vault:<sha>` and `:latest` |
@@ -233,6 +233,7 @@ On a throwaway branch, I commit a fake Vault token (`hvs.…`) and open a pull r
   - **Spring Boot** (dashboard ID 11378): JVM memory, CPU, HTTP traffic
   - **Democyber Security**: app and Vault status, 401 vs 200 answers on `/api/secure`, Vault request rate
 - Grafana has no data volume on purpose: at each start it reads the current admin password from Vault.
+- Grafana downloads no plugin at startup (`GF_PLUGINS_PREINSTALL_DISABLED`): it runs only the code of its pinned image.
 
 ## 10. Project structure
 
