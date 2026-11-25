@@ -272,11 +272,12 @@ $bash = Join-Path (Split-Path (Split-Path (Get-Command git).Source)) 'bin\bash.e
 | **Spring Boot 2.1 System Monitor** ([grafana.com ID 11378](https://grafana.com/grafana/dashboards/11378)) | http://localhost:3001/d/spring-boot-11378 | JVM memory, CPU, threads, garbage collection, HTTP traffic, log events |
 
 - Every metric name in these dashboards was first checked against the real list in Prometheus.
-- Dashboard 11378 is the community file (revision 2), with 4 changes only:
+- Dashboard 11378 is the community file (revision 2), with 5 changes only:
   1. its 47 `${DS_PROMETHEUS}` placeholders now point to our data source (uid `prometheus`);
   2. `__inputs` removed: only the manual "Import" window uses it;
   3. `__requires` removed: the same, a plugin list for that window;
-  4. fixed uid `spring-boot-11378`, so the link never changes.
+  4. fixed uid `spring-boot-11378`, so the link never changes;
+  5. "Non-Heap Used" counts only the memory pools that have a limit. Metaspace has none (its max is `-1`), so the original query put its usage into a wrong percentage. The Codex review of pull request #7 found it.
 - On dashboard 11378, the HikariCP and Jetty panels stay empty: the app has no database, and it runs on Tomcat, not Jetty. Grafana 13 shows its old Graph and Singlestat panels (2019) as Time series and Stat panels. In the heap panels, `Max -1 B` means that the JVM sets no fixed limit for that memory pool (normal with the G1 garbage collector).
 - `dashboards.yml`: a change made in the UI cannot be saved (`allowUiUpdates: false`), and a dashboard whose JSON file is removed is also removed from Grafana (`disableDeletion: false`). Git stays the only source of truth.
 - Right after a start, the Grafana search page may not list the dashboards yet: Grafana builds its search index in the background. The links above always work.
