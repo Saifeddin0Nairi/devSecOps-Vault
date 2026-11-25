@@ -105,7 +105,16 @@ jobs:
           name: trivy-report
           path: trivy-report.json
 
-      # 7. Vault integration test: added in Phase 4
+      # 7. Vault integration test: the same image, with Vault, vault-init and least privilege
+      - name: Vault integration test
+        env:
+          DEMOCYBER_IMAGE: ${{ env.IMAGE }}   # the image tested and scanned above, never rebuilt
+        run: |
+          # .env for this run only: a random dev root token, hidden in the job log
+          token=$(openssl rand -hex 16)
+          echo "::add-mask::$token"
+          (umask 077 && printf 'VAULT_DEV_ROOT_TOKEN_ID=%s\n' "$token" > .env)
+          ./scripts/test-vault-integration.sh
 
       # 8. Publish: only on a push to main, and only the exact image tested above
       - name: Log in to Docker Hub
