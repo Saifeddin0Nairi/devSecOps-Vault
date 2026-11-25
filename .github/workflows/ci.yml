@@ -55,7 +55,8 @@ jobs:
       - name: Build and test (Maven Wrapper)
         run: ./mvnw -B verify
 
-      # 3. Code analysis + Quality Gate
+      # 3. Code analysis + Quality Gate. SonarQube Cloud analyzes the whole repository:
+      #    it ignores sonar.sources and sonar.tests, so they are not set here.
       - name: SonarCloud scan (waits for the Quality Gate)
         uses: SonarSource/sonarqube-scan-action@59202af334b4ba7b5db01b701b8e79f8b3bef0f4 # v8.5.0
         env:
@@ -64,8 +65,6 @@ jobs:
           args: >
             -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
             -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}
-            -Dsonar.sources=src/main,pom.xml,Dockerfile
-            -Dsonar.tests=src/test
             -Dsonar.java.binaries=target/classes
             -Dsonar.java.test.binaries=target/test-classes
             -Dsonar.qualitygate.wait=true
