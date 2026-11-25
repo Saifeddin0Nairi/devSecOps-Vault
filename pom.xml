@@ -61,6 +61,14 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
+            <!-- Security fix: spring-cloud-starter 5.0.5 brings Bouncy Castle 1.85.2, which has 3 HIGH
+                 CVEs (CVE-2026-18036, CVE-2026-71886, CVE-2026-71891, fixed in 1.86). 1.87 is the latest
+                 release (11 Nov 2026). Remove this pin when Spring Cloud ships a fixed version. -->
+            <dependency>
+                <groupId>org.bouncycastle</groupId>
+                <artifactId>bcprov-jdk18on</artifactId>
+                <version>1.87</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 

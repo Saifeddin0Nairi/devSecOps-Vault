@@ -1,0 +1,14 @@
+# Grafana dashboards, provisioned as code (README section 9): no manual import, no clicks.
+# Grafana loads every *.json file of this folder into the folder "Democyber" at startup,
+# then looks for new, changed or removed files every 30 seconds.
+apiVersion: 1
+
+providers:
+  - name: democyber
+    folder: Democyber
+    type: file
+    disableDeletion: false    # JSON file removed = dashboard removed: no dashboard outside Git
+    allowUiUpdates: false     # a change made in the UI cannot be saved: Git is the only source of truth
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/provisioning/dashboards

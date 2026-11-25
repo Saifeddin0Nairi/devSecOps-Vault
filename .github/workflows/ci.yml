@@ -55,7 +55,8 @@ jobs:
       - name: Build and test (Maven Wrapper)
         run: ./mvnw -B verify
 
-      # 3. Code analysis + Quality Gate
+      # 3. Code analysis + Quality Gate. SonarQube Cloud analyzes the whole repository:
+      #    it ignores sonar.sources and sonar.tests, so they are not set here.
       - name: SonarCloud scan (waits for the Quality Gate)
         uses: SonarSource/sonarqube-scan-action@59202af334b4ba7b5db01b701b8e79f8b3bef0f4 # v8.5.0
         env:
@@ -64,8 +65,6 @@ jobs:
           args: >
             -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
             -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}
-            -Dsonar.sources=src/main,pom.xml,Dockerfile
-            -Dsonar.tests=src/test
             -Dsonar.java.binaries=target/classes
             -Dsonar.java.test.binaries=target/test-classes
             -Dsonar.qualitygate.wait=true
@@ -89,6 +88,7 @@ jobs:
 
       # 6. Image scan
       - name: Trivy scan (blocks HIGH and CRITICAL)
+        id: trivy
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           version: v0.70.0
@@ -99,7 +99,7 @@ jobs:
           exit-code: "1"
 
       - name: Upload Trivy report
-        if: always()
+        if: always() && steps.trivy.outcome != 'skipped'   # no report when the job stopped before Trivy
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: trivy-report
