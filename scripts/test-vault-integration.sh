@@ -23,13 +23,20 @@ base_url="http://127.0.0.1:8080"
 step() { printf '\n== %s\n' "$*"; }
 ok() { printf 'ok   %s\n' "$*"; }
 
-show_logs=yes
+# Last log lines, for debugging, with every possible copy of the API key removed:
+# the lines that hold the key itself (once it is known) are dropped, and any 64-character
+# hex value (the format of the key Vault generates) is hidden. This also protects a failure
+# that happens before the key is read, and local runs, where GitHub cannot mask anything.
+print_logs() {
+  echo "--- last lines of the vault-init and democyber logs (secrets hidden):"
+  docker compose logs --no-color --tail 25 vault-init democyber 2>&1 \
+    | { if [ -n "${key:-}" ]; then grep -vF -- "$key"; else cat; fi; } \
+    | sed -E 's/[0-9a-fA-F]{64}/[hidden]/g'
+}
+
 fail() {
   printf '\nVAULT INTEGRATION TEST FAILED: %s\n' "$*"
-  if [ "$show_logs" = yes ]; then
-    echo "--- last lines of the vault-init and democyber logs:"
-    docker compose logs --no-color --tail 25 vault-init democyber 2>&1
-  fi
+  print_logs
   exit 1
 }
 
@@ -118,8 +125,7 @@ expect 401 "$(status -H 'X-API-Key: wrong-key')" "GET /api/secure with a wrong k
 expect 200 "$(status_with_key)" "GET /api/secure with the key from Vault"
 
 if docker compose logs --no-color democyber 2>&1 | grep -qF -- "$key"; then
-  show_logs=no # that log holds the key: never print it
-  fail "the API key appears in the app log (log not printed)"
+  fail "the API key appears in the app log"
 fi
 ok "the API key is not in the app log"
 
