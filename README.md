@@ -87,7 +87,7 @@ One job, like in the TPs: [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
 
 | # | Step | Tool | Blocks the pipeline when… | Evidence |
 |---|---|---|---|---|
-| 1 | Secret scan | Gitleaks | a secret is found in the history | `gitleaks-report` artifact (SARIF) |
+| 1 | Secret scan | Gitleaks | a secret is found in the pushed commits | `gitleaks-report` artifact (SARIF) |
 | 2 | Build + tests | Maven | the code does not compile or a test fails | test results in the log |
 | 3 | Code analysis | SonarCloud | the Quality Gate fails | SonarCloud dashboard |
 | 4 | Image build | Docker | the build fails | image `democyber-vault:ci-<sha>` |
@@ -134,8 +134,8 @@ Rules:
 - **Not in Git**: Gitleaks is green.
 - **Not in the image**: `.dockerignore` sends only the JAR to the build.
 - **Not in `compose.yml` or `docker inspect`**: containers receive file paths, not values.
-- **Not in the logs**: the app, `vault-init` and Vault Agent never print a secret value. Only Vault itself, in dev mode, prints its own root token when it starts (see [section 12](#12-limits-and-next-steps)).
-- `.env` holds one value only, the Vault dev root token. It is git-ignored (see the limits in [section 12](#12-limits-and-next-steps)).
+- **Not in the logs**: the app, `vault-init` and Vault Agent never print a secret value. Only Vault itself, in dev mode, prints its own root token when it starts (see [section 13](#13-limits-and-next-steps)).
+- `.env` holds one value only, the Vault dev root token. It is git-ignored (see the limits in [section 13](#13-limits-and-next-steps)).
 
 ### 6.4 Honest limit: "secret zero"
 
@@ -264,9 +264,22 @@ $bash = Join-Path (Split-Path (Split-Path (Get-Command git).Source)) 'bin\bash.e
 ## 9. Monitoring
 
 - Prometheus scrapes `democyber:8081/actuator/prometheus` every 5 seconds, Vault's `/v1/sys/metrics` (with its own token), and itself.
-- Grafana is provisioned as code (data source and dashboards), so there are no manual clicks:
-  - **Spring Boot** (dashboard ID 11378): JVM memory, CPU, HTTP traffic
-  - **Democyber Security**: app and Vault status, 401 vs 200 answers on `/api/secure`, Vault request rate
+- Grafana is provisioned as code (data source and dashboards), so there are no manual clicks. The 2 dashboards are in the Grafana folder **Democyber**:
+
+| Dashboard | Link | What it shows |
+|---|---|---|
+| **Democyber Security** (made for this project) | http://localhost:3001/d/democyber-security | app up, Vault up and unsealed, 401 (refused) vs 200 (accepted) on `/api/secure`, Vault requests, Vault answers by HTTP code (403 = access denied) |
+| **Spring Boot 2.1 System Monitor** ([grafana.com ID 11378](https://grafana.com/grafana/dashboards/11378)) | http://localhost:3001/d/spring-boot-11378 | JVM memory, CPU, threads, garbage collection, HTTP traffic, log events |
+
+- Every metric name in these dashboards was first checked against the real list in Prometheus.
+- Dashboard 11378 is the community file (revision 2), with 4 changes only:
+  1. its 47 `${DS_PROMETHEUS}` placeholders now point to our data source (uid `prometheus`);
+  2. `__inputs` removed: only the manual "Import" window uses it;
+  3. `__requires` removed: the same, a plugin list for that window;
+  4. fixed uid `spring-boot-11378`, so the link never changes.
+- On dashboard 11378, the HikariCP and Jetty panels stay empty: the app has no database, and it runs on Tomcat, not Jetty. Grafana 13 shows its old Graph and Singlestat panels (2019) as Time series and Stat panels. In the heap panels, `Max -1 B` means that the JVM sets no fixed limit for that memory pool (normal with the G1 garbage collector).
+- `dashboards.yml`: a change made in the UI cannot be saved (`allowUiUpdates: false`), and a dashboard whose JSON file is removed is also removed from Grafana (`disableDeletion: false`). Git stays the only source of truth.
+- Right after a start, the Grafana search page may not list the dashboards yet: Grafana builds its search index in the background. The links above always work.
 - Grafana has no data volume on purpose: at each start it reads the current admin password from Vault.
 - Grafana downloads no plugin at startup (`GF_PLUGINS_PREINSTALL_DISABLED`): it runs only the code of its pinned image.
 
@@ -275,22 +288,27 @@ $bash = Join-Path (Split-Path (Split-Path (Get-Command git).Source)) 'bin\bash.e
 ```text
 devSecOps-Vault/
 ├── .github/workflows/ci.yml       # the CI/CD pipeline
-├── src/main/...                   # Spring Boot app: /, /api/secure, Actuator
+├── src/main/...                   # Spring Boot app: /, /api/secure, Actuator; Vault settings in application.properties
 ├── src/test/...                   # web tests
 ├── vault/
 │   ├── init/vault-init.sh         # bootstrap: secrets, policies, AppRoles, audit log
 │   ├── policies/                  # democyber, grafana, metrics, democyber-deny (demo)
 │   └── agent/                     # Vault Agent config and template for Grafana
 ├── monitoring/
-│   ├── prometheus.yml
-│   └── grafana/                   # provisioning and dashboards as code
+│   ├── prometheus.yml             # scrape targets: the app, Vault, Prometheus
+│   └── grafana/provisioning/      # Grafana as code (section 9)
+│       ├── datasources/           # prometheus.yml: the Prometheus data source (uid prometheus)
+│       └── dashboards/            # dashboards.yml (loader) and the 2 dashboard JSON files
 ├── scripts/
-│   ├── smoke-test.sh
-│   └── test-vault-integration.sh
+│   ├── smoke-test.sh              # CI step 5
+│   └── test-vault-integration.sh  # CI step 7, also runs locally (section 8)
 ├── Dockerfile                     # non-root runtime image
 ├── compose.yml                    # vault, vault-init, democyber, vault-agent, prometheus, grafana
+├── pom.xml                        # Maven build: Spring Boot, Spring Cloud Vault, Java 21
 ├── .env.example                   # VAULT_DEV_ROOT_TOKEN_ID only
-├── .gitattributes, .gitignore, .dockerignore
+├── .gitattributes                 # LF line endings for everything that runs in Linux
+├── .gitignore                     # target/, .env, local scan reports
+├── .dockerignore                  # only the JAR goes to the Docker build
 ├── mvnw, mvnw.cmd, .mvn/          # Maven Wrapper
 └── README.md
 ```
@@ -310,7 +328,28 @@ devSecOps-Vault/
 - [ ] Prometheus targets all UP, then `democyber` DOWN during Demo 2
 - [ ] Grafana: Spring Boot and Democyber Security dashboards
 
-## 12. Limits and next steps
+## 12. Security review
+
+Threat by threat: what protects the project, the proof, and what is still open.
+
+| # | Threat | Control in this project | Evidence | Still open / next step |
+|---|---|---|---|---|
+| 1 | A secret is committed to Git | Gitleaks checks the commits of every push and pull request (step 1); `.env` is git-ignored | Demo 5: pull request #6 fails at step 1. Local scan of the full history: 0 leaks | Gitleaks runs after the push. GitHub secret scanning did not flag the fake Vault token, so Gitleaks is still needed. Next: a pre-commit hook |
+| 2 | An API key or a password is written in the code | Vault generates the values (`sys/tools/random`); the app and Grafana get them at startup | Demo 1 and step 7; `admin/admin` is refused | A new key needs an app restart (Demo 3) |
+| 3 | A stolen app login reads other secrets | One read-only policy per client, for one path only | Demo 2 and step 7: access denied, so the app does not start | Production: short token TTLs and an AppRole bound to the app's network (CIDR) |
+| 4 | Someone copies the app's Vault login (`secret-id`) | Each login file is in a private volume that only its client can read (section 6.2) | Design in `vault-init.sh` and `compose.yml` | "Secret zero" (section 6.4): platform identity or single-use `secret-id` |
+| 5 | Nobody knows who read a secret | Vault audit log; secret values are HMAC hashes | Demo 4: `root` vs `democyber`, and the `DENIED` row | The log stays on this laptop. Production: send it to a SIEM |
+| 6 | A vulnerable library or base image | Trivy blocks HIGH and CRITICAL (step 6); pinned versions | `trivy-report` artifact on every run | Dependabot alerts are off in the GitHub settings. Next: turn them on |
+| 7 | Bad code reaches `main` | Web tests; SonarCloud Quality Gate, the job waits for it (step 3) | Quality Gate passed, 0 issues | Coverage is 0%: no JaCoCo report yet |
+| 8 | Changed third-party code runs in the pipeline | Actions pinned by commit SHA, Docker images pinned to a version, no Grafana plugin download | `ci.yml`, `compose.yml` | Images are not signed (Cosign) |
+| 9 | A pipeline token leaks | GitHub Secrets; read-only `GITHUB_TOKEN`; values hidden with `::add-mask::`; pull requests never publish | Pull request runs: the publish steps are skipped | Static tokens. Next: OIDC ([section 13](#13-limits-and-next-steps)) |
+| 10 | A change reaches `main` without review | Since the pipeline exists, every change came through a pull request with a green run | Pull requests #1, #3, #4, #5 (#2 and #6: red demos, never merged) | No branch protection yet: `main` should require a pull request and green checks |
+| 11 | A service is open to the network | Every port is bound to `127.0.0.1`; Actuator is on port `8081`, not published | `docker compose ps -a`; smoke test (step 5) | — |
+| 12 | A container runs as root | The app runs as user `10001`; Vault and Vault Agent run as `vault` | `Dockerfile`; SonarCloud: 0 issues | `vault-init` runs as root, with one capability only (`CHOWN`) |
+| 13 | The Vault root token leaks | Dev mode only; the token is only in `.env` (git-ignored) | Gitleaks green; section 6.3 | Dev mode is for demos only ([section 13](#13-limits-and-next-steps)) |
+| 14 | Nobody knows how to report a security problem | — | — | No `SECURITY.md` yet |
+
+## 13. Limits and next steps
 
 - **Dev mode** keeps data in memory, and anyone who controls Docker on this laptop can see the root token (in `.env`, in `docker inspect` and in the Vault startup log). Next step: server mode with Raft storage, TLS and unseal keys.
 - **Secret zero**: use a platform identity or wrapped, single-use `secret-id`s.
