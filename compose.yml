@@ -82,7 +82,14 @@ services:
   # Grafana cannot talk to Vault: Vault Agent logs in (AppRole) and writes the password file.
   vault-agent:
     image: hashicorp/vault:2.1.2
-    command: ["agent", "-config=/vault/agent/agent.hcl"]
+    # Named volumes survive "docker compose down", so the password file of an earlier run can
+    # still be here. The agent deletes it before it starts: the healthcheck below then waits
+    # for the NEW password from Vault, and Grafana never starts with an old one.
+    # docker-entrypoint.sh is the image's normal entrypoint (no core dumps, dumb-init as PID 1).
+    entrypoint:
+      - /bin/sh
+      - -c
+      - rm -f /secrets/admin-password && exec docker-entrypoint.sh agent -config=/vault/agent/agent.hcl
     volumes:
       - ./vault/agent:/vault/agent:ro
       - grafana-bootstrap:/bootstrap:ro
