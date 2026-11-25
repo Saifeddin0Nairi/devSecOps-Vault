@@ -1,26 +1,121 @@
-# Democyber Vault: local runtime.
+# Democyber Vault: local runtime (README sections 6 and 7).
 # Every published port is bound to 127.0.0.1, so it is reachable from this PC only.
 # Start: docker compose up -d --build --wait
 name: democyber-vault
 
 services:
+  # HashiCorp Vault in dev mode: in memory, already unsealed. For demos only.
+  vault:
+    image: hashicorp/vault:2.1.2
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_DEV_ROOT_TOKEN_ID:?Set VAULT_DEV_ROOT_TOKEN_ID in .env}
+      # Telemetry for Prometheus: /v1/sys/metrics?format=prometheus
+      VAULT_LOCAL_CONFIG: '{"telemetry": {"prometheus_retention_time": "30s", "disable_hostname": true}}'
+      # So that admin commands work: docker compose exec vault vault ...
+      VAULT_ADDR: http://127.0.0.1:8200
+      VAULT_TOKEN: ${VAULT_DEV_ROOT_TOKEN_ID}
+    cap_add: [IPC_LOCK]           # recommended by the Vault image (memory locking)
+    ports:
+      - "127.0.0.1:8200:8200"
+    volumes:
+      - ./vault/policies:/vault/policies:ro
+      - vault-audit:/vault/logs   # audit log (Demo 4)
+    healthcheck:
+      test: ["CMD", "vault", "status"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  # One-shot bootstrap: secrets, policies, AppRoles, audit log, login files.
+  # It runs as root with one capability only (CHOWN): it must give each login file to
+  # the user of its client. It is the trusted admin of this dev setup.
+  vault-init:
+    image: hashicorp/vault:2.1.2
+    user: "0"
+    cap_drop: [ALL]
+    cap_add: [CHOWN]
+    entrypoint: ["/bin/sh", "/vault/init/vault-init.sh"]
+    environment:
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: ${VAULT_DEV_ROOT_TOKEN_ID}
+    volumes:
+      - ./vault/init/vault-init.sh:/vault/init/vault-init.sh:ro
+      - ./vault/policies:/vault/policies:ro
+      - democyber-bootstrap:/bootstrap/democyber
+      - grafana-bootstrap:/bootstrap/grafana
+      - prometheus-bootstrap:/bootstrap/prometheus
+      - grafana-secrets:/bootstrap/grafana-secrets
+    depends_on:
+      vault:
+        condition: service_healthy
+    restart: "no"
+
   democyber:
     build: .
     # CI runs the image it already built and scanned (DEMOCYBER_IMAGE). Locally: democyber-vault:local.
     image: ${DEMOCYBER_IMAGE:-democyber-vault:local}
+    environment:
+      # Turns Spring Cloud Vault on. The other Vault settings are in application.properties.
+      SPRING_CLOUD_VAULT_ENABLED: "true"
+    # AppRole login: role-id and secret-id come from this client's own volume, read-only.
+    # This small wrapper gives them to the Java process only: the values are never in
+    # compose.yml, in "docker inspect" or in the image.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        export SPRING_CLOUD_VAULT_APPROLE_ROLEID="$$(cat /bootstrap/role-id)"
+        export SPRING_CLOUD_VAULT_APPROLE_SECRETID="$$(cat /bootstrap/secret-id)"
+        exec java -jar /app/app.jar
+    volumes:
+      - democyber-bootstrap:/bootstrap:ro
     ports:
       - "127.0.0.1:8080:8080"   # application only. Actuator (8081) is NOT published.
     cap_drop: [ALL]             # the app needs no Linux capability
     security_opt:
       - no-new-privileges:true
+    depends_on:
+      vault-init:
+        condition: service_completed_successfully
     # Healthcheck: defined in the Dockerfile (Actuator health on 8081).
+
+  # Grafana cannot talk to Vault: Vault Agent logs in (AppRole) and writes the password file.
+  vault-agent:
+    image: hashicorp/vault:2.1.2
+    # Named volumes survive "docker compose down", so the password file of an earlier run can
+    # still be here. The agent deletes it before it starts: the healthcheck below then waits
+    # for the NEW password from Vault, and Grafana never starts with an old one.
+    # docker-entrypoint.sh is the image's normal entrypoint (no core dumps, dumb-init as PID 1).
+    entrypoint:
+      - /bin/sh
+      - -c
+      - rm -f /secrets/admin-password && exec docker-entrypoint.sh agent -config=/vault/agent/agent.hcl
+    volumes:
+      - ./vault/agent:/vault/agent:ro
+      - grafana-bootstrap:/bootstrap:ro
+      - grafana-secrets:/secrets
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      vault-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "test -s /secrets/admin-password"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
 
   prometheus:
     image: prom/prometheus:v3.16.0
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-bootstrap:/etc/prometheus/vault:ro   # token to read Vault's metrics
     ports:
       - "127.0.0.1:9090:9090"
+    depends_on:
+      vault-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9090/-/healthy"]
       interval: 10s
@@ -30,22 +125,32 @@ services:
   grafana:
     image: grafana/grafana:13.3.1
     environment:
-      # Temporary (Phase 1): the admin password comes from .env, with no default value.
-      # Phase 3 replaces it with a password generated and delivered by Vault.
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD in .env}
+      # Admin password: Grafana reads it from the file written by Vault Agent.
+      # Only a file path is configured here, never the value.
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana/admin-password
       # No plugin download at startup. By default Grafana fetches "suggested" plugins from
       # the internet, unpinned. We only need the built-in Prometheus data source.
       GF_PLUGINS_PREINSTALL_DISABLED: "true"
     volumes:
-      # Data source provisioned as code (read-only)
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
-    # No data volume on purpose: a new container starts clean and applies the admin password.
+      - grafana-secrets:/run/secrets/grafana:ro
+    # No data volume on purpose: a new container starts clean and applies the current password.
     ports:
       - "127.0.0.1:3001:3000"
     depends_on:
-      - prometheus
+      vault-agent:
+        condition: service_healthy
+      prometheus:
+        condition: service_started
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/api/health"]
       interval: 10s
       timeout: 3s
       retries: 10
+
+volumes:
+  vault-audit:            # Vault audit log
+  democyber-bootstrap:    # democyber's AppRole login (written by vault-init)
+  grafana-bootstrap:      # Grafana agent's AppRole login (written by vault-init)
+  prometheus-bootstrap:   # Prometheus token for Vault metrics (written by vault-init)
+  grafana-secrets:        # Grafana admin password file (written by Vault Agent)
