@@ -93,7 +93,7 @@ One job, like in the TPs: [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
 | 4 | Image build | Docker | the build fails | image `democyber-vault:ci-<sha>` |
 | 5 | Smoke test | curl | health is not UP, `/` is not 200, `/api/secure` without a key is not 401, or Actuator answers on the public port | job log |
 | 6 | Image scan | Trivy | a HIGH or CRITICAL vulnerability is found | `trivy-report` artifact (JSON) |
-| 7 | Vault integration test | Docker Compose + Vault | the app does not get its secret, or still starts when Vault denies access | job log |
+| 7 | Vault integration test | Docker Compose + Vault | the app does not get its secret from Vault, the key shows up in its log, or the app still starts when Vault denies access | job log |
 | 8 | Publish | Docker Hub | (runs only on a push to `main`) | `saifeddinenairi/democyber-vault:<sha>` and `:latest` |
 
 Rules:
@@ -176,7 +176,7 @@ Stop with `docker compose down`. Vault runs in dev mode (in memory), so the next
 
 ## 8. Demo scenarios
 
-Each demo follows the TP method: it works, then I break it, the control blocks it, then I fix it.
+Each demo follows the TP method: it works, then I break it, the control blocks it, then I fix it. Demos 1 and 2 also run on every pipeline run (step 7, [`scripts/test-vault-integration.sh`](scripts/test-vault-integration.sh)).
 
 ### Demo 1: the secret comes from Vault
 
@@ -191,40 +191,75 @@ In Grafana, the Vault password works and `admin/admin` is refused.
 
 ### Demo 2: least privilege (no access, no start)
 
+I replace the app's policy with one that denies its secret, then restart the app:
+
 ```powershell
 docker compose exec -T vault vault policy write democyber /vault/policies/democyber-deny.hcl
 docker compose restart democyber
-docker compose logs --tail 20 democyber    # "permission denied": the app stops
+Start-Sleep -Seconds 20
+docker compose ps -a democyber      # Exited (1): the app refused to start
+docker compose logs democyber | Select-String -Context 1,0 'permission denied' | Select-Object -Last 1
 ```
 
-In Prometheus (Status → Targets), `democyber` is **DOWN**. Then restore the policy:
+In Prometheus (Status → Targets), `democyber` is **DOWN**. Then I restore the policy:
 
 ```powershell
 docker compose exec -T vault vault policy write democyber /vault/policies/democyber.hcl
-docker compose restart democyber           # healthy again
+docker compose up -d --no-deps --wait democyber    # starts the app again and waits until it is healthy
 ```
 
 ### Demo 3: rotation
 
+Vault makes a new random key (a new version). The app reads it at its next start:
+
 ```powershell
-docker compose exec -T vault sh -c 'vault kv put secret/democyber api-key=$(vault write -field=random_bytes sys/tools/random/32 format=hex)'
+$old = docker compose exec -T vault vault kv get -field=api-key secret/democyber
+docker compose exec -T vault sh -c 'v=$(vault write -field=random_bytes sys/tools/random/32 format=hex); printf %s $v | vault kv put secret/democyber api-key=-'
+docker compose exec -T vault vault kv metadata get secret/democyber    # current_version goes up by 1
 docker compose restart democyber
-docker compose exec -T vault vault kv metadata get secret/democyber    # current_version is now 2
+docker compose up -d --no-deps --wait democyber                       # waits until healthy
+$new = docker compose exec -T vault vault kv get -field=api-key secret/democyber
+curl.exe -s -o NUL -w "old key -> %{http_code}`n" -H "X-API-Key: $old" http://localhost:8080/api/secure    # 401
+curl.exe -s -o NUL -w "new key -> %{http_code}`n" -H "X-API-Key: $new" http://localhost:8080/api/secure    # 200
 ```
 
-The old key now gets 401. The new key (read it again with Demo 1) gets 200.
+The new value reaches `vault kv put` on stdin (`api-key=-`), so it never appears in a command line.
 
 ### Demo 4: audit trail
 
 ```powershell
-docker compose exec -T vault sh -c 'tail -n 3 /vault/logs/audit.log'
+docker compose exec -T vault cat /vault/logs/audit.log |
+  Select-String -Pattern '"path":"secret/(data/)?democyber"' |
+  ForEach-Object { $_.Line | ConvertFrom-Json } |
+  Where-Object type -eq 'response' |
+  Select-Object time, @{n='who'; e={$_.auth.display_name}}, @{n='policies'; e={$_.auth.policies -join ','}}, @{n='operation'; e={$_.request.operation}}, @{n='path'; e={$_.request.path}}, @{n='result'; e={if ($_.error) {'DENIED'} else {'ok'}}} |
+  Format-Table -AutoSize
 ```
 
-Each line shows who asked (AppRole `democyber`), when, and which path. Secret values appear only as HMAC hashes.
+One line per access to the app's secret: when, who (`token` with the `root` policy is me, `approle` with the `democyber` policy is the app) and the result. The `DENIED` row comes from Demo 2. Its path has no `data/`: Vault also refused to tell the app that `secret/` is a KV version 2 engine, so Spring Vault tried the old version 1 path, and Vault refused that too.
+
+The secret value itself is never in the log, only its HMAC hash:
+
+```powershell
+docker compose exec -T vault cat /vault/logs/audit.log |
+  Select-String -SimpleMatch '"path":"secret/data/democyber"' |
+  ForEach-Object { $_.Line | ConvertFrom-Json } |
+  Where-Object { $_.response.data.data.'api-key' } |
+  Select-Object -Last 1 @{n='api-key in the audit log'; e={$_.response.data.data.'api-key'}}
+```
 
 ### Demo 5: Gitleaks catches a Vault token
 
-On a throwaway branch, I commit a fake Vault token (`hvs.…`) and open a pull request. Gitleaks fails the pipeline. Then I close the pull request without merging and delete the branch, so `main` stays clean.
+On a throwaway branch, I add a fake Vault token (`hvs.` and 95 random characters) to `application.properties` and open a pull request. The default Gitleaks rule `vault-service-token` finds it, and the pipeline fails at step 1. Then I close the pull request without merging and delete the branch, so `main` stays clean.
+
+### Run the Vault integration test locally
+
+It needs `.env` and the image `democyber-vault:local` (quick start). It replaces the running stack and removes it at the end.
+
+```powershell
+$bash = Join-Path (Split-Path (Split-Path (Get-Command git).Source)) 'bin\bash.exe'   # Git Bash
+& $bash scripts/test-vault-integration.sh; "exit code: $LASTEXITCODE"                  # PASSED, 0
+```
 
 ## 9. Monitoring
 
@@ -271,6 +306,7 @@ devSecOps-Vault/
 - [ ] `docker compose ps -a`: all services healthy, ports on `127.0.0.1`
 - [ ] Vault UI: secrets engine, policies, AppRole auth method, audit device
 - [ ] Demos 1 to 4 in the terminal, with no secret value visible
+- [ ] Vault integration test: PASSED, then FAILED with the deny policy broken on purpose, then PASSED again
 - [ ] Prometheus targets all UP, then `democyber` DOWN during Demo 2
 - [ ] Grafana: Spring Boot and Democyber Security dashboards
 
