@@ -327,6 +327,7 @@ devSecOps-Vault/
 - [ ] Vault integration test: PASSED, then FAILED with the deny policy broken on purpose, then PASSED again
 - [ ] Prometheus targets all UP, then `democyber` DOWN during Demo 2
 - [ ] Grafana: Spring Boot and Democyber Security dashboards
+- [ ] SonarQube Cloud: 6 dependency risks before the Bouncy Castle pin, 3 after (section 12)
 
 ## 12. Security review
 
@@ -339,7 +340,7 @@ Threat by threat: what protects the project, the proof, and what is still open.
 | 3 | A stolen app login reads other secrets | One read-only policy per client, for one path only | Demo 2 and step 7: access denied, so the app does not start | Production: short token TTLs and an AppRole bound to the app's network (CIDR) |
 | 4 | Someone copies the app's Vault login (`secret-id`) | Each login file is in a private volume that only its client can read (section 6.2) | Design in `vault-init.sh` and `compose.yml` | "Secret zero" (section 6.4): platform identity or single-use `secret-id` |
 | 5 | Nobody knows who read a secret | Vault audit log; secret values are HMAC hashes | Demo 4: `root` vs `democyber`, and the `DENIED` row | The log stays on this laptop. Production: send it to a SIEM |
-| 6 | A vulnerable library or base image | Trivy blocks HIGH and CRITICAL (step 6); pinned versions | `trivy-report` artifact on every run | Dependabot alerts are off in the GitHub settings. Next: turn them on |
+| 6 | A vulnerable library or base image | Trivy blocks HIGH and CRITICAL (step 6); SonarQube Cloud also lists dependency risks; pinned versions | `trivy-report` artifact on every run; Bouncy Castle pinned to 1.87 (table below) | 3 lower risks accepted (table below). Dependabot alerts are off in the GitHub settings. Next: turn them on |
 | 7 | Bad code reaches `main` | Web tests; SonarCloud Quality Gate, the job waits for it (step 3) | Quality Gate passed, 0 issues | Coverage is 0%: no JaCoCo report yet |
 | 8 | Changed third-party code runs in the pipeline | Actions pinned by commit SHA, Docker images pinned to a version, no Grafana plugin download | `ci.yml`, `compose.yml` | Images are not signed (Cosign) |
 | 9 | A pipeline token leaks | GitHub Secrets; read-only `GITHUB_TOKEN`; values hidden with `::add-mask::`; pull requests never publish | Pull request runs: the publish steps are skipped | Static tokens. Next: OIDC ([section 13](#13-limits-and-next-steps)) |
@@ -348,6 +349,15 @@ Threat by threat: what protects the project, the proof, and what is still open.
 | 12 | A container runs as root | The app runs as user `10001`; Vault and Vault Agent run as `vault` | `Dockerfile`; SonarCloud: 0 issues | `vault-init` runs as root, with one capability only (`CHOWN`) |
 | 13 | The Vault root token leaks | Dev mode only; the token is only in `.env` (git-ignored) | Gitleaks green; section 6.3 | Dev mode is for demos only ([section 13](#13-limits-and-next-steps)) |
 | 14 | Nobody knows how to report a security problem | — | — | No `SECURITY.md` yet |
+
+**Dependency risks found by SonarQube Cloud (25 November 2026)**
+
+| Library (how it comes in) | CVE | CVSS | Decision |
+|---|---|---|---|
+| Bouncy Castle `bcprov-jdk18on` 1.85.2 (via `spring-cloud-starter`) | CVE-2026-18036, CVE-2026-71886, CVE-2026-71891 | 7.1 to 8.2 (High) | **Fixed**: pinned to 1.87 in `pom.xml` (these CVEs are fixed since 1.86) |
+| `logback-classic` 1.5.38 (Spring Boot logging) | CVE-2026-104721 | not scored yet | Accepted for now: the bug is in the MDC-based `SiftingAppender`, which this app does not use. The fix exists only in logback 1.6.5 and later, and Spring Boot 4.1 still ships 1.5.38 |
+| `json-smart` 2.6.0 (tests only) | CVE-2026-113602 | 6.9 (Medium) | Accepted: test scope only, not in the image |
+| `HdrHistogram` 2.2.2 (via Micrometer) | CVE-2026-14686 | 1.9 (Low) | Accepted: low risk |
 
 ## 13. Limits and next steps
 
